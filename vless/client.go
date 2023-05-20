@@ -2,7 +2,6 @@ package vless
 
 import (
 	"encoding/binary"
-	N "github.com/sagernet/sing/common/network"
 	"io"
 	"net"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 
 	"github.com/gofrs/uuid/v5"
 )
