@@ -134,13 +134,15 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 	if err != nil {
 		return
 	}
+	var buffer *buf.Buffer
 	switch c.header[4] {
 	case StatusNew:
 		return M.Socksaddr{}, E.New("unexpected frame new")
 	case StatusKeep:
+		buffer = c.newBuffer()
 		if length != 4 {
-			buffer := c.newBuffer()
-			_, err = buffer.ReadFullFrom(c.Conn, int(length)-2)
+			start := buffer.Start()
+			_, err = buffer.ReadFullFrom(c.Conn, int(length)-4)
 			if err != nil {
 				buffer.Release()
 				return
@@ -151,22 +153,24 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 				buffer.Release()
 				return
 			}
+			buffer.Resize(start, 0)
 		} else {
 			destination = c.destination
 		}
 	case StatusEnd:
 		return M.Socksaddr{}, io.EOF
 	case StatusKeepAlive:
+		buffer = c.newBuffer()
 	default:
 		return M.Socksaddr{}, E.New("unexpected frame: ", c.header[4])
 	}
 	// option error
 	if c.header[5]&2 == 2 {
+		buffer.Release()
 		return M.Socksaddr{}, E.Cause(net.ErrClosed, "remote closed")
 	}
 	// option data
 	if c.header[5]&1 != 1 {
-		buffer := c.newBuffer()
 		destination, err = c.ReadPacket(buffer)
 		if err != nil {
 			buffer.Release()
@@ -175,9 +179,9 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 	} else {
 		err = binary.Read(c.Conn, binary.BigEndian, &length)
 		if err != nil {
+			buffer.Release()
 			return
 		}
-		buffer := c.newBuffer()
 		_, err = buffer.ReadFullFrom(c.Conn, int(length))
 		if err != nil {
 			buffer.Release()
