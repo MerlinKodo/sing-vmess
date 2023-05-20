@@ -2,6 +2,7 @@ package vless
 
 import (
 	"encoding/binary"
+	N "github.com/sagernet/sing/common/network"
 	"io"
 	"net"
 
@@ -92,12 +93,15 @@ func (c *Conn) Upstream() any {
 	return c.Conn
 }
 
+var _ N.PacketReadWaiter = (*PacketConn)(nil)
+
 type PacketConn struct {
 	net.Conn
 	key            []byte
 	destination    M.Socksaddr
 	requestWritten bool
 	responseRead   bool
+	newBuffer      func() *buf.Buffer
 }
 
 func (c *PacketConn) Read(b []byte) (n int, err error) {
@@ -153,6 +157,32 @@ func (c *PacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 		return
 	}
 	addr = c.destination.UDPAddr()
+	return
+}
+
+func (c *PacketConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
+	c.newBuffer = newBuffer
+}
+
+func (c *PacketConn) WaitReadPacket() (destination M.Socksaddr, err error) {
+	if !c.responseRead {
+		err = ReadResponse(c.Conn)
+		if err != nil {
+			return
+		}
+		c.responseRead = true
+	}
+	destination = c.destination
+	var length uint16
+	err = binary.Read(c.Conn, binary.BigEndian, &length)
+	if err != nil {
+		return
+	}
+	buffer := c.newBuffer()
+	_, err = buffer.ReadFullFrom(c.Conn, int(length))
+	if err != nil {
+		buffer.Release()
+	}
 	return
 }
 

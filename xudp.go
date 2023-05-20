@@ -13,11 +13,18 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
+var (
+	_ PacketConn         = (*XUDPConn)(nil)
+	_ N.PacketReadWaiter = (*XUDPConn)(nil)
+)
+
 type XUDPConn struct {
 	net.Conn
 	writer         N.ExtendedWriter
 	destination    M.Socksaddr
 	requestWritten bool
+	newBuffer      func() *buf.Buffer
+	header         [6]byte
 }
 
 func NewXUDPConn(conn net.Conn, destination M.Socksaddr) *XUDPConn {
@@ -94,7 +101,7 @@ func (c *XUDPConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err 
 		return M.Socksaddr{}, io.EOF
 	case StatusKeepAlive:
 	default:
-		return M.Socksaddr{}, E.New("unexpected frame: ", buffer.Byte(2))
+		return M.Socksaddr{}, E.New("unexpected frame: ", header[2])
 	}
 	// option error
 	if header[3]&2 == 2 {
@@ -111,6 +118,71 @@ func (c *XUDPConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err 
 		}
 		buffer.Resize(start, 0)
 		_, err = buffer.ReadFullFrom(c.Conn, int(length))
+		return
+	}
+}
+
+func (c *XUDPConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
+	c.newBuffer = newBuffer
+}
+
+func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
+	_, err = io.ReadFull(c.Conn, c.header[:])
+	if err != nil {
+		return
+	}
+	length := binary.BigEndian.Uint16(c.header[:])
+	if err != nil {
+		return
+	}
+	switch c.header[4] {
+	case StatusNew:
+		return M.Socksaddr{}, E.New("unexpected frame new")
+	case StatusKeep:
+		if length != 4 {
+			buffer := c.newBuffer()
+			_, err = buffer.ReadFullFrom(c.Conn, int(length)-2)
+			if err != nil {
+				buffer.Release()
+				return
+			}
+			buffer.Advance(1)
+			destination, err = AddressSerializer.ReadAddrPort(buffer)
+			if err != nil {
+				buffer.Release()
+				return
+			}
+		} else {
+			destination = c.destination
+		}
+	case StatusEnd:
+		return M.Socksaddr{}, io.EOF
+	case StatusKeepAlive:
+	default:
+		return M.Socksaddr{}, E.New("unexpected frame: ", c.header[4])
+	}
+	// option error
+	if c.header[5]&2 == 2 {
+		return M.Socksaddr{}, E.Cause(net.ErrClosed, "remote closed")
+	}
+	// option data
+	if c.header[5]&1 != 1 {
+		buffer := c.newBuffer()
+		destination, err = c.ReadPacket(buffer)
+		if err != nil {
+			buffer.Release()
+		}
+		return
+	} else {
+		err = binary.Read(c.Conn, binary.BigEndian, &length)
+		if err != nil {
+			return
+		}
+		buffer := c.newBuffer()
+		_, err = buffer.ReadFullFrom(c.Conn, int(length))
+		if err != nil {
+			buffer.Release()
+		}
 		return
 	}
 }
@@ -151,6 +223,7 @@ func (c *XUDPConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) erro
 	} else {
 		header := buffer.ExtendHeader(c.frontHeadroom(addrLen))
 		binary.BigEndian.PutUint16(header, uint16(5+addrLen))
+		_ = header[7]
 		header[2] = 0
 		header[3] = 0
 		header[4] = 2 // frame keep

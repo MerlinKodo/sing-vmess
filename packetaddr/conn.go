@@ -11,6 +11,8 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
+var _ N.PacketReadWaitCreator = (*PacketConn)(nil)
+
 type PacketConn struct {
 	N.NetPacketConn
 	bindAddr M.Socksaddr
@@ -95,4 +97,51 @@ func (c *PacketConn) FrontHeadroom() int {
 
 func (c *PacketConn) Upstream() any {
 	return c.NetPacketConn
+}
+
+func (c *PacketConn) CreateReadWaiter() (N.PacketReadWaiter, bool) {
+	prw, isReadWaiter := bufio.CreatePacketReadWaiter(c.NetPacketConn)
+	if isReadWaiter {
+		return &readWaiterPacketConn{
+			readWaiter: prw,
+			bindAddr:   c.bindAddr,
+		}, true
+	}
+	return nil, false
+}
+
+var _ N.PacketReadWaiter = (*readWaiterPacketConn)(nil)
+
+type readWaiterPacketConn struct {
+	readWaiter N.PacketReadWaiter
+	bindAddr   M.Socksaddr
+	buffer     *buf.Buffer
+}
+
+func (c *readWaiterPacketConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
+	if newBuffer != nil {
+		newBuffer = func() *buf.Buffer {
+			c.buffer = newBuffer()
+			return c.buffer
+		}
+	}
+	c.readWaiter.InitializeReadWaiter(newBuffer)
+}
+
+func (c *readWaiterPacketConn) WaitReadPacket() (destination M.Socksaddr, err error) {
+	_, err = c.readWaiter.WaitReadPacket()
+	if err != nil {
+		c.buffer = nil
+		return
+	}
+	destination, err = AddressSerializer.ReadAddrPort(c.buffer)
+	if err != nil {
+		c.buffer.Release()
+	}
+	c.buffer = nil
+	return
+}
+
+func (c *readWaiterPacketConn) Upstream() any {
+	return c.readWaiter
 }
