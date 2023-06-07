@@ -92,17 +92,17 @@ func (c *Client) DialEarlyPacketConn(upstream net.Conn, destination M.Socksaddr)
 	return &clientPacketConn{clientConn{c.dialRaw(upstream, CommandUDP, destination)}, destination}
 }
 
-func (c *Client) DialXUDPPacketConn(upstream net.Conn, destination M.Socksaddr) (PacketConn, error) {
+func (c *Client) DialXUDPPacketConn(upstream net.Conn, globalID [8]byte, destination M.Socksaddr) (PacketConn, error) {
 	conn := &clientConn{c.dialRaw(upstream, CommandMux, destination)}
 	err := conn.writeHandshake(nil)
 	if err != nil {
 		return nil, err
 	}
-	return NewXUDPConn(conn, destination), nil
+	return NewXUDPConn(conn, globalID, destination), nil
 }
 
-func (c *Client) DialEarlyXUDPPacketConn(upstream net.Conn, destination M.Socksaddr) PacketConn {
-	return NewXUDPConn(&clientConn{c.dialRaw(upstream, CommandMux, destination)}, destination)
+func (c *Client) DialEarlyXUDPPacketConn(upstream net.Conn, globalID [8]byte, destination M.Socksaddr) PacketConn {
+	return NewXUDPConn(&clientConn{c.dialRaw(upstream, CommandMux, destination)}, globalID, destination)
 }
 
 type rawClientConn struct {

@@ -44,17 +44,17 @@ func (c *Client) DialEarlyPacketConn(conn net.Conn, destination M.Socksaddr) *Pa
 	return &PacketConn{Conn: conn, key: c.key, destination: destination}
 }
 
-func (c *Client) DialXUDPPacketConn(conn net.Conn, destination M.Socksaddr) (vmess.PacketConn, error) {
+func (c *Client) DialXUDPPacketConn(conn net.Conn, globalID [8]byte, destination M.Socksaddr) (vmess.PacketConn, error) {
 	serverConn := &Conn{Conn: conn, key: c.key, command: vmess.CommandMux, destination: destination}
 	err := common.Error(serverConn.Write(nil))
 	if err != nil {
 		return nil, err
 	}
-	return vmess.NewXUDPConn(serverConn, destination), nil
+	return vmess.NewXUDPConn(serverConn, globalID, destination), nil
 }
 
-func (c *Client) DialEarlyXUDPPacketConn(conn net.Conn, destination M.Socksaddr) vmess.PacketConn {
-	return vmess.NewXUDPConn(&Conn{Conn: conn, key: c.key, command: vmess.CommandMux, destination: destination}, destination)
+func (c *Client) DialEarlyXUDPPacketConn(conn net.Conn, globalID [8]byte, destination M.Socksaddr) vmess.PacketConn {
+	return vmess.NewXUDPConn(&Conn{Conn: conn, key: c.key, command: vmess.CommandMux, destination: destination}, globalID, destination)
 }
 
 type Conn struct {

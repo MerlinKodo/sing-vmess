@@ -23,15 +23,17 @@ type XUDPConn struct {
 	writer         N.ExtendedWriter
 	destination    M.Socksaddr
 	requestWritten bool
+	globalID       [8]byte
 	newBuffer      func() *buf.Buffer
 	header         [6]byte
 }
 
-func NewXUDPConn(conn net.Conn, destination M.Socksaddr) *XUDPConn {
+func NewXUDPConn(conn net.Conn, globalID [8]byte, destination M.Socksaddr) *XUDPConn {
 	return &XUDPConn{
 		Conn:        conn,
 		writer:      bufio.NewExtendedWriter(conn),
 		destination: destination,
+		globalID:    globalID,
 	}
 }
 
@@ -200,6 +202,9 @@ func (c *XUDPConn) frontHeadroom(addrLen int) int {
 		headerLen += 2 // frame len
 		headerLen += 5 // frame header
 		headerLen += addrLen
+		if c.globalID != [8]byte{} {
+			headerLen += 8 // global ID
+		}
 		headerLen += 2 // payload len
 		return headerLen
 	} else {
@@ -211,17 +216,21 @@ func (c *XUDPConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) erro
 	dataLen := buffer.Len()
 	addrLen := M.SocksaddrSerializer.AddrPortLen(destination)
 	if !c.requestWritten {
-		header := buf.With(buffer.ExtendHeader(c.frontHeadroom(addrLen)))
+		headerLen := c.frontHeadroom(addrLen)
+		header := buf.With(buffer.ExtendHeader(headerLen))
 		common.Must(
-			binary.Write(header, binary.BigEndian, uint16(5+addrLen)),
+			binary.Write(header, binary.BigEndian, uint16(headerLen-4)),
 			header.WriteByte(0),
 			header.WriteByte(0),
 			header.WriteByte(1), // frame type new
 			header.WriteByte(1), // option data
 			header.WriteByte(NetworkUDP),
 			AddressSerializer.WriteAddrPort(header, destination),
-			binary.Write(header, binary.BigEndian, uint16(dataLen)),
 		)
+		if c.globalID != [8]byte{} {
+			common.Must1(header.Write(c.globalID[:]))
+		}
+		common.Must(binary.Write(header, binary.BigEndian, uint16(dataLen)))
 		c.requestWritten = true
 	} else {
 		header := buffer.ExtendHeader(c.frontHeadroom(addrLen))
