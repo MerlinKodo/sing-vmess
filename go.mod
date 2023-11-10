@@ -1,4 +1,4 @@
-module github.com/metacubex/sing-vmess
+module github.com/MerlinKodo/sing-vmess
 
 go 1.18
 
